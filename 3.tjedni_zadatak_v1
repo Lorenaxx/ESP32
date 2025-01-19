@@ -1,0 +1,95 @@
+#include "Seeed_SHT35.h"
+#include <U8g2lib.h>
+#include <Wire.h>
+#include <Dps3xx.h>
+
+// SHT35 sensor setup:
+const unsigned char SCLPIN = 22;
+const unsigned char SHT35_IIC_ADDR = 0x45;
+SHT35 sensor(SCLPIN, SHT35_IIC_ADDR);
+
+// DPS310 sensor setup (using Dps3xx library):
+Dps3xx dps310;
+
+// OLED setup:
+U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0);
+
+void setup()
+{
+  Wire.begin();
+  Serial.begin(115200);
+  u8g2.begin();
+  u8g2.setFont(u8g2_font_ncenB08_tr);
+
+  // Initialize SHT35 sensor
+  if (sensor.init()) {
+    Serial.println("SHT35 Sensor init failed!");
+  } else {
+    Serial.println("SHT35 Sensor init successful.");
+  }
+
+  // Initialize DPS310 sensor
+  dps310.begin(Wire); // Uklonjena usporedba
+  Serial.println("DPS310 Sensor initialized."); // Dodana potvrda inicijalizacije
+
+  // Scan I2C devices only once
+  Serial.println("I2C Scan beginning.");
+  for (byte address = 1; address < 128; address++) {
+    Wire.beginTransmission(address);
+    if (Wire.endTransmission() == 0) {
+      Serial.print("I2C device found at address 0x");
+      Serial.println(address, HEX);
+    }
+  }
+  Serial.println("I2C Scan done.");
+  delay(1000);
+}
+
+void loop()
+{
+  float temp, hum, pressure;
+  
+  // Read temperature and humidity from SHT35
+  if (NO_ERROR == sensor.read_meas_data_single_shot(HIGH_REP_WITH_STRCH, &temp, &hum)) {
+    Serial.print("Temperature: ");
+    Serial.print(temp);
+    Serial.println(" °C");
+    Serial.print("Humidity: ");
+    Serial.print(hum);
+    Serial.println(" %");
+  } else {
+    Serial.println("Failed to read from SHT35 sensor!");
+    temp = hum = NAN; // Use NAN to indicate an error
+  }
+
+  // Read pressure from DPS310
+  if (dps310.measurePressureOnce(pressure, 7) == 0) { // Oversampling rate set to 7
+    Serial.print("Pressure: ");
+    Serial.print(pressure);
+    Serial.println(" Pa");
+  } else {
+    Serial.println("Failed to read from DPS310 sensor!");
+    pressure = NAN; // Use NAN to indicate an error
+  }
+
+  // Display readings on OLED
+  u8g2.clearBuffer();
+  
+  if (!isnan(temp)) {
+    String tempStr = "Temp: " + String(temp, 1) + " C";
+    u8g2.drawStr(0, 10, tempStr.c_str());
+  }
+  
+  if (!isnan(hum)) {
+    String humStr = "Humidity: " + String(hum, 1) + " %";
+    u8g2.drawStr(0, 28, humStr.c_str());
+  }
+  
+  if (!isnan(pressure)) {
+    String pressStr = "Pressure: " + String(pressure / 100.0, 2) + " hPa"; // Convert Pa to hPa
+    u8g2.drawStr(0, 46, pressStr.c_str());
+  }
+  
+  u8g2.sendBuffer();
+  delay(1000);
+}
