@@ -1,0 +1,182 @@
+#include "Seeed_SHT35.h"
+#include <U8g2lib.h>
+#include <Wire.h>
+#include <Dps3xx.h>
+
+// SHT35 sensor setup:
+const unsigned char SCLPIN = 22;
+const unsigned char SHT35_IIC_ADDR = 0x45;
+SHT35 sensor(SCLPIN, SHT35_IIC_ADDR);
+
+// DPS310 sensor setup (using Dps3xx library):
+Dps3xx dps310;
+
+// OLED setup:
+U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0);
+
+// Pin for touch sensor
+int senzorDodira = 4; // Pin za senzor dodira
+int vrijednost = 0; // Varijabla za pohranu vrijednosti očitane sa senzora
+
+// Variables to track the sensor readings and statistics
+float temp_min = 1000.0, temp_max = -1000.0, temp_sum = 0.0;
+int temp_count = 0;
+float humidity_min = 100.0, humidity_max = 0.0, humidity_sum = 0.0;
+int humidity_count = 0;
+float pressure_min = 1000.0, pressure_max = 0.0, pressure_sum = 0.0;
+int pressure_count = 0;
+
+// Time tracking variables
+unsigned long touchStartTime = 0;
+bool isTouching = false;
+
+// States for the display
+enum State {
+  CURRENT_VALUES,
+  TEMP_STATS,
+  HUMIDITY_STATS,
+  PRESSURE_STATS
+};
+
+State currentState = CURRENT_VALUES;
+
+// Function to calculate min, max, and average
+void updateStats(float value, float &minVal, float &maxVal, float &sum, int &count) {
+  if (value < minVal) minVal = value;
+  if (value > maxVal) maxVal = value;
+  sum += value;
+  count++;
+}
+
+// Function to reset all statistics
+void resetStats() {
+  temp_min = 1000.0; temp_max = -1000.0; temp_sum = 0.0; temp_count = 0;
+  humidity_min = 100.0; humidity_max = 0.0; humidity_sum = 0.0; humidity_count = 0;
+  pressure_min = 1000.0; pressure_max = 0.0; pressure_sum = 0.0; pressure_count = 0;
+}
+
+// Function to handle touch sensor input
+void handleTouch() {
+  // Očitavanje vrijednosti touch senzora
+  vrijednost = touchRead(senzorDodira);
+  Serial.println(vrijednost); // Provjera očitanja u Serial Monitoru
+
+  // Ako je vrijednost dodira ispod praga, senzor je dodirnut
+  if (vrijednost < 40) {  // Ovdje postavite prag za detekciju dodira
+    if (!isTouching) {
+      touchStartTime = millis();
+      isTouching = true;
+    } else {
+      unsigned long touchDuration = millis() - touchStartTime;
+      if (touchDuration >= 5000) {
+        // Reset stats after 5 seconds
+        resetStats();
+        currentState = CURRENT_VALUES; // Show current values after reset
+      } else if (touchDuration >= 2000) {
+        // 2 seconds touch: Switch between stats
+        switch (currentState) {
+          case CURRENT_VALUES:
+            currentState = TEMP_STATS;
+            break;
+          case TEMP_STATS:
+            currentState = HUMIDITY_STATS;
+            break;
+          case HUMIDITY_STATS:
+            currentState = PRESSURE_STATS;
+            break;
+          case PRESSURE_STATS:
+            currentState = CURRENT_VALUES;
+            break;
+        }
+      }
+    }
+  } else {
+    isTouching = false;
+  }
+}
+
+void setup() {
+  Wire.begin();
+  Serial.begin(115200);
+  u8g2.begin();
+  u8g2.setFont(u8g2_font_ncenB08_tr);
+
+  // Initialize SHT35 sensor
+  if (sensor.init()) {
+    Serial.println("SHT35 Sensor init failed!");
+  } else {
+    Serial.println("SHT35 Sensor init successful.");
+  }
+
+  // Initialize DPS310 sensor
+  dps310.begin(Wire);
+  Serial.println("DPS310 Sensor initialized.");
+
+  // Scan I2C devices
+  Serial.println("I2C Scan beginning.");
+  for (byte address = 1; address < 128; address++) {
+    Wire.beginTransmission(address);
+    if (Wire.endTransmission() == 0) {
+      Serial.print("I2C device found at address 0x");
+      Serial.println(address, HEX);
+    }
+  }
+  Serial.println("I2C Scan done.");
+  delay(1000);
+}
+
+void loop() {
+  float temp, hum, pressure;
+
+  // Handle touch input
+  handleTouch();
+
+  // Read temperature and humidity from SHT35
+  if (NO_ERROR == sensor.read_meas_data_single_shot(HIGH_REP_WITH_STRCH, &temp, &hum)) {
+    updateStats(temp, temp_min, temp_max, temp_sum, temp_count);
+    updateStats(hum, humidity_min, humidity_max, humidity_sum, humidity_count);
+  } else {
+    Serial.println("Failed to read from SHT35 sensor!");
+    temp = hum = NAN; // Use NAN to indicate an error
+  }
+
+  // Read pressure from DPS310
+  if (dps310.measurePressureOnce(pressure, 7) == 0) {
+    updateStats(pressure, pressure_min, pressure_max, pressure_sum, pressure_count);
+  } else {
+    Serial.println("Failed to read from DPS310 sensor!");
+    pressure = NAN; // Use NAN to indicate an error
+  }
+
+  // Display based on current state
+  u8g2.clearBuffer();
+
+  switch (currentState) {
+    case CURRENT_VALUES:
+      if (!isnan(temp)) u8g2.drawStr(0, 10, ("Temp: " + String(temp, 1) + " C").c_str());
+      if (!isnan(hum)) u8g2.drawStr(0, 28, ("Humidity: " + String(hum, 1) + " %").c_str());
+      if (!isnan(pressure)) u8g2.drawStr(0, 46, ("Pressure: " + String(pressure / 100.0, 2) + " hPa").c_str());
+      break;
+    case TEMP_STATS:
+      u8g2.drawStr(0, 10, ("Temp: " + String(temp, 1) + " C").c_str());
+      u8g2.drawStr(0, 28, ("Min: " + String(temp_min, 1) + " C").c_str());
+      u8g2.drawStr(0, 46, ("Max: " + String(temp_max, 1) + " C").c_str());
+      u8g2.drawStr(0, 56, ("Avg: " + String(temp_sum / temp_count, 1) + " C").c_str());
+      break;
+    case HUMIDITY_STATS:
+      u8g2.drawStr(0, 10, ("Humidity: " + String(hum, 1) + " %").c_str());
+      u8g2.drawStr(0, 28, ("Min: " + String(humidity_min, 1) + " %").c_str());
+      u8g2.drawStr(0, 46, ("Max: " + String(humidity_max, 1) + " %").c_str());
+      u8g2.drawStr(0, 56, ("Avg: " + String(humidity_sum / humidity_count, 1) + " %").c_str());
+      break;
+    case PRESSURE_STATS:
+      u8g2.drawStr(0, 10, ("Pressure: " + String(pressure / 100.0, 2) + " hPa").c_str());
+      u8g2.drawStr(0, 28, ("Min: " + String(pressure_min / 100.0, 2) + " hPa").c_str());
+      u8g2.drawStr(0, 46, ("Max: " + String(pressure_max / 100.0, 2) + " hPa").c_str());
+      u8g2.drawStr(0, 56, ("Avg: " + String(pressure_sum / pressure_count / 100.0, 2) + " hPa").c_str());
+      break;
+  }
+
+  u8g2.sendBuffer();
+  delay(1000);
+}
