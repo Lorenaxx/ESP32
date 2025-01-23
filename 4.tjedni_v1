@@ -59,28 +59,29 @@ Reads file /path/ on filesystem /fs/ and sends it over serial port
 and displays on screen.
 */
 void displayFile(fs::FS &fs, U8G2& disp, const char * path) {
-Serial.printf("Reading file: %s\r\n", path);
-File file = fs.open(path);
-if (!file || file.isDirectory()) {
-Serial.println("Failed to open file for reading!");
-return;
-}
-String buffer;
-while (file.available()) {
-char next = file.read();
-buffer += next;
-if (next == '\n'){
-Serial.print(buffer);
-disp.clearBuffer();
-disp.setFont(u8g2_font_profont12_tr);
-disp.drawStr(0, 10, "Log file:");
-disp.drawStr(0, 28, buffer.c_str());
-disp.sendBuffer();
-buffer = "";
-}
-}
-file.close();
-}
+  Serial.printf("Reading file: %s\r\n", path);
+  
+  File file = fs.open(path);
+  if (!file || file.isDirectory()) {
+    Serial.println("Failed to open file for reading!");
+    return;
+  }
+  String buffer;
+  while (file.available()) {
+    char next = file.read();
+    buffer += next;
+    if (next == '\n'){
+      Serial.print(buffer);
+      disp.clearBuffer();
+      disp.setFont(u8g2_font_profont12_tr);
+      disp.drawStr(0, 10, "Log file:");
+      disp.drawStr(0, 28, buffer.c_str());
+      disp.sendBuffer();
+      buffer = "";
+     }
+   }
+   file.close();
+ } 
 
 
 // Pin for touch sensor
